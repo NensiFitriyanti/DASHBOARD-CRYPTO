@@ -8,139 +8,134 @@ import time
 # ---------------------------------------
 # PAGE CONFIG
 # ---------------------------------------
-st.set_page_config(
-    page_title="Real-Time DOGE Dashboard",
-    layout="wide"
-)
+st.set_page_config(page_title="Real-Time DOGE Dashboard", layout="wide")
 
-st.markdown(
-    """
-    <h1 style='color:#00FFAA; font-weight:700;'>🚀 Real-Time DOGE/USDT Dashboard</h1>
-    <p style='color:#cccccc;'>Monitoring harga Dogecoin secara real-time menggunakan Binance WebSocket API.</p>
-    """,
-    unsafe_allow_html=True
-)
-
-# ---------------------------------------
-# LOAD SECRET
-# ---------------------------------------
-try:
-    WS_URL = st.secrets["WS_URL"]
-except:
-    WS_URL = "wss://stream.binance.com:9443/ws/dogeusdt@trade"  # fallback aman
+st.title("🚀 Real-Time DOGE/USDT Dashboard")
+st.write("Monitoring harga Dogecoin secara real-time menggunakan Binance WebSocket API.")
 
 
 # ---------------------------------------
-# DATA STORAGE
+# SESSION STATE SETUP
 # ---------------------------------------
-df = pd.DataFrame(columns=["time", "price"])
-current_price = 0.0
-prev_price = 0.0
+if "df" not in st.session_state:
+    st.session_state.df = pd.DataFrame(columns=["time", "price"])
 
-# UI placeholders
-col1, col2, col3 = st.columns(3)
-placeholder_price = col1.empty()
-placeholder_change = col2.empty()
-placeholder_highlow = col3.empty()
-placeholder_chart = st.empty()
+if "current_price" not in st.session_state:
+    st.session_state.current_price = 0.0
+
+if "prev_price" not in st.session_state:
+    st.session_state.prev_price = 0.0
 
 
 # ---------------------------------------
 # WEBSOCKET CALLBACK
 # ---------------------------------------
 def on_message(ws, message):
-    global df, current_price, prev_price
-
     data = json.loads(message)
     price = float(data["p"])
     timestamp = pd.Timestamp.now()
 
-    prev_price = current_price
-    current_price = price
+    st.session_state.prev_price = st.session_state.current_price
+    st.session_state.current_price = price
 
-    df.loc[len(df)] = [timestamp, price]
+    # tambah data baru
+    st.session_state.df.loc[len(st.session_state.df)] = [timestamp, price]
 
-    # limiting dataframe so memory stays light
-    if len(df) > 500:
-        df = df.iloc[-500:]
+    # batasi 300 data biar ringan
+    if len(st.session_state.df) > 300:
+        st.session_state.df = st.session_state.df.iloc[-300:]
 
 
 # ---------------------------------------
-# RUN WEBSOCKET
+# WEBSOCKET RUNNER
 # ---------------------------------------
 def run_ws():
-    ws = websocket.WebSocketApp(WS_URL, on_message=on_message)
+    ws = websocket.WebSocketApp(
+        "wss://stream.binance.com:9443/ws/dogeusdt@trade",
+        on_message=on_message
+    )
     ws.run_forever()
 
 
-# Jalankan WebSocket sebagai thread
-ws_thread = threading.Thread(target=run_ws)
-ws_thread.daemon = True
-ws_thread.start()
+# jalankan WebSocket sekali saja
+if "ws_started" not in st.session_state:
+    t = threading.Thread(target=run_ws)
+    t.daemon = True
+    t.start()
+    st.session_state.ws_started = True
 
 
 # ---------------------------------------
-# MAIN STREAMLIT LOOP
+# UI PLACEHOLDERS
 # ---------------------------------------
-while True:
+col1, col2, col3 = st.columns(3)
+ph_price = col1.empty()
+ph_change = col2.empty()
+ph_highlow = col3.empty()
+ph_chart = st.empty()
+
+
+# ---------------------------------------
+# NON-BLOCKING UI UPDATE
+# ---------------------------------------
+def update_ui():
+
+    df = st.session_state.df
+
     if len(df) > 2:
+        curr = st.session_state.current_price
+        prev = st.session_state.prev_price
 
-        # indikator harga naik/turun
-        if current_price > prev_price:
-            price_color = "#00FF00"
+        # indikator
+        if curr > prev:
+            color = "green"
             arrow = "▲"
-        elif current_price < prev_price:
-            price_color = "#FF5555"
+        elif curr < prev:
+            color = "red"
             arrow = "▼"
         else:
-            price_color = "#FFFFFF"
+            color = "white"
             arrow = "▬"
+
+        # harga
+        ph_price.markdown(
+            f"""
+            <h3 style='color:#bbb;'>Harga Sekarang</h3>
+            <h1 style='color:{color};'>{arrow} {curr:.6f} USDT</h1>
+            """,
+            unsafe_allow_html=True
+        )
 
         # persen perubahan
         try:
-            percent_change = ((current_price - prev_price) / prev_price) * 100
+            p_change = ((curr - prev) / prev) * 100
         except:
-            percent_change = 0
+            p_change = 0
 
-        # card harga
-        placeholder_price.markdown(
+        ph_change.markdown(
             f"""
-            <div style="background-color:#111111; padding:15px; border-radius:10px;">
-                <h3 style="color:#bbbbbb;">Harga Sekarang</h3>
-                <h1 style="color:{price_color};">{arrow} {current_price:.6f} USDT</h1>
-            </div>
+            <h3 style='color:#bbb;'>% Perubahan</h3>
+            <h1 style='color:{color};'>{p_change:.4f}%</h1>
             """,
             unsafe_allow_html=True
         )
 
-        # card perubahan
-        placeholder_change.markdown(
+        # high low session
+        ph_highlow.markdown(
             f"""
-            <div style="background-color:#111111; padding:15px; border-radius:10px;">
-                <h3 style="color:#bbbbbb;">Perubahan Harga</h3>
-                <h1 style="color:{price_color};">{percent_change:.4f}%</h1>
-            </div>
+            <h3 style='color:#bbb;'>High - Low</h3>
+            <h4 style='color:#0ff;'>High : {df.price.max():.6f}</h4>
+            <h4 style='color:#fa0;'>Low : {df.price.min():.6f}</h4>
             """,
             unsafe_allow_html=True
         )
 
-        # card high–low session
-        high_price = df["price"].max()
-        low_price = df["price"].min()
+        # grafik
+        ph_chart.line_chart(df, x="time", y="price")
 
-        placeholder_highlow.markdown(
-            f"""
-            <div style="background-color:#111111; padding:15px; border-radius:10px;">
-                <h3 style="color:#bbbbbb;">High - Low (Session)</h3>
-                <h2 style="color:#00FFFF;">High : {high_price:.6f}</h2>
-                <h2 style="color:#FFAA00;">Low  : {low_price:.6f}</h2>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
 
-        # grafik real-time
-        with placeholder_chart.container():
-            st.line_chart(df, x="time", y="price")
-
+# Loop update UI tanpa blocking
+for i in range(10000):
+    update_ui()
     time.sleep(0.5)
+    st.experimental_rerun()
