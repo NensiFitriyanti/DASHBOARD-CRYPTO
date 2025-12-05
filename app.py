@@ -42,10 +42,22 @@ if price is not None:
     if len(st.session_state.df) > 300:
         st.session_state.df = st.session_state.df.iloc[-300:]
 
+    # FIXED → pakai triple quotes
     placeholder_price.markdown(
-        f"### 💰 Harga Terbaru: **{price:.5f} USD**  
-        ⏳ Auto refresh setiap 1 detik"
+        f"""
+        ### 💰 Harga Terbaru: **{price:.5f} USD**  
+        ⏳ Auto refresh setiap 1 detik
+        """
     )
 
     placeholder_chart.line_chart(
-        st.se
+        st.session_state.df,
+        x="time",
+        y="price"
+    )
+else:
+    placeholder_price.error("Tidak bisa mengambil harga. Coba lagi.")
+
+# auto refresh
+time.sleep(1)
+st.experimental_set_query_params(refresh=str(time.time()))
