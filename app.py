@@ -13,7 +13,6 @@ st.set_page_config(page_title="Real-Time DOGE Dashboard", layout="wide")
 st.title("🚀 Real-Time DOGE/USDT Dashboard")
 st.write("Monitoring harga Dogecoin secara real-time menggunakan Binance WebSocket API.")
 
-
 # ---------------------------------------
 # SESSION STATE SETUP
 # ---------------------------------------
@@ -38,18 +37,16 @@ def on_message(ws, message):
     st.session_state.prev_price = st.session_state.current_price
     st.session_state.current_price = price
 
-    # tambah data baru
     st.session_state.df.loc[len(st.session_state.df)] = [timestamp, price]
 
-    # batasi 300 data biar ringan
     if len(st.session_state.df) > 300:
         st.session_state.df = st.session_state.df.iloc[-300:]
 
 
 # ---------------------------------------
-# WEBSOCKET RUNNER
+# START WEBSOCKET THREAD (once)
 # ---------------------------------------
-def run_ws():
+def start_ws():
     ws = websocket.WebSocketApp(
         "wss://stream.binance.com:9443/ws/dogeusdt@trade",
         on_message=on_message
@@ -57,9 +54,8 @@ def run_ws():
     ws.run_forever()
 
 
-# jalankan WebSocket sekali saja
 if "ws_started" not in st.session_state:
-    t = threading.Thread(target=run_ws)
+    t = threading.Thread(target=start_ws)
     t.daemon = True
     t.start()
     st.session_state.ws_started = True
@@ -76,66 +72,66 @@ ph_chart = st.empty()
 
 
 # ---------------------------------------
-# NON-BLOCKING UI UPDATE
+# UPDATE UI (NO LOOP)
 # ---------------------------------------
-def update_ui():
+df = st.session_state.df
 
-    df = st.session_state.df
+if len(df) > 2:
+    curr = st.session_state.current_price
+    prev = st.session_state.prev_price
 
-    if len(df) > 2:
-        curr = st.session_state.current_price
-        prev = st.session_state.prev_price
+    # indikator naik turun
+    if curr > prev:
+        color = "green"
+        arrow = "▲"
+    elif curr < prev:
+        color = "red"
+        arrow = "▼"
+    else:
+        color = "yellow"
+        arrow = "▬"
 
-        # indikator
-        if curr > prev:
-            color = "green"
-            arrow = "▲"
-        elif curr < prev:
-            color = "red"
-            arrow = "▼"
-        else:
-            color = "white"
-            arrow = "▬"
+    # harga
+    ph_price.markdown(
+        f"""
+        <h3 style='color:#bbb;'>Harga Sekarang</h3>
+        <h1 style='color:{color};'>{arrow} {curr:.6f} USDT</h1>
+        """,
+        unsafe_allow_html=True
+    )
 
-        # harga
-        ph_price.markdown(
-            f"""
-            <h3 style='color:#bbb;'>Harga Sekarang</h3>
-            <h1 style='color:{color};'>{arrow} {curr:.6f} USDT</h1>
-            """,
-            unsafe_allow_html=True
-        )
+    # persen perubahan
+    try:
+        p_change = ((curr - prev) / prev) * 100
+    except:
+        p_change = 0
 
-        # persen perubahan
-        try:
-            p_change = ((curr - prev) / prev) * 100
-        except:
-            p_change = 0
+    ph_change.markdown(
+        f"""
+        <h3 style='color:#bbb;'>% Perubahan</h3>
+        <h1 style='color:{color};'>{p_change:.4f}%</h1>
+        """,
+        unsafe_allow_html=True
+    )
 
-        ph_change.markdown(
-            f"""
-            <h3 style='color:#bbb;'>% Perubahan</h3>
-            <h1 style='color:{color};'>{p_change:.4f}%</h1>
-            """,
-            unsafe_allow_html=True
-        )
+    # high low
+    ph_highlow.markdown(
+        f"""
+        <h3 style='color:#bbb;'>High - Low</h3>
+        <h4 style='color:#0ff;'>High : {df.price.max():.6f}</h4>
+        <h4 style='color:#fa0;'>Low : {df.price.min():.6f}</h4>
+        """,
+        unsafe_allow_html=True
+    )
 
-        # high low session
-        ph_highlow.markdown(
-            f"""
-            <h3 style='color:#bbb;'>High - Low</h3>
-            <h4 style='color:#0ff;'>High : {df.price.max():.6f}</h4>
-            <h4 style='color:#fa0;'>Low : {df.price.min():.6f}</h4>
-            """,
-            unsafe_allow_html=True
-        )
-
-        # grafik
-        ph_chart.line_chart(df, x="time", y="price")
+    # chart
+    ph_chart.line_chart(df, x="time", y="price")
 
 
-# Loop update UI tanpa blocking
-for i in range(10000):
-    update_ui()
-    time.sleep(0.5)
-    st.experimental_rerun()
+# ---------------------------------------
+# AUTO REFRESH EVERY 1 SECOND
+# ---------------------------------------
+st.write("⏳ Auto refresh setiap 1 detik...")
+time.sleep(1)
+st.experimental_set_query_params(refresh=str(time.time()))
+
